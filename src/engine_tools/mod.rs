@@ -20,8 +20,6 @@ pub mod gui_spacing;
 pub mod mesh_selection;
 pub mod mesh_uv;
 pub(crate) mod persistence;
-/// Reusable structural and kinetic platforming prefab recipes.
-pub mod platformer_prefabs;
 /// Typed platformer route graphs stored in versioned Forge project records.
 pub mod platformer_route_records;
 mod presets;
@@ -92,6 +90,24 @@ use persistence::{
     ProjectStore, RoadJunctionDraft, RoadJunctionKind, RoadSplinePointDraft, SceneObjectDraft,
     TransformDraft, WorldTopologyEdgeDraft, WorldTopologyEdgeKind, WorldTopologyNodeDraft,
     WorldTopologyNodeKind, WorldTopologySocketDraft, WorldTopologySocketKind,
+};
+// Pure mesh/collider geometry with no ForgeProject dependency — lives under
+// `world` because gameplay (`world::platformer_route_spawn`) consumes it
+// directly with no Designer feature gate; kept as a qualified module import
+// here so every existing `platformer_prefabs::...` call site below resolves
+// unchanged.
+use crate::world::dialogue_schema;
+use crate::world::platformer_prefabs;
+// Published-content catalogs and the procedural material resolution pipeline
+// now live under `world` — genuinely neutral runtime data/systems pure
+// gameplay also reads (`world::published_content`, `plugins::world_plugin`).
+// Imported back here, unqualified, so every existing call site below keeps
+// resolving exactly as it did when these all lived in this file.
+use crate::world::published_catalogs::{
+    apply_catalog_material, remove_mesh_material_components, EditorMaterialBinding,
+    ProceduralRecipeKind, PublishedContentCatalogEpoch, PublishedCreatureCatalog,
+    PublishedMapPoint, PublishedMapPointKind, PublishedMaterialCatalog, PublishedMaterialEntry,
+    PublishedMaterialHandle, PublishedProceduralRecipeCatalog, PublishedProceduralRecipeEntry,
 };
 
 #[derive(SystemParam)]
@@ -194,267 +210,6 @@ struct ForgeMaterialSpec {
     preset: usize,
     values: [f32; 6],
 }
-
-#[derive(Debug, Clone)]
-enum PublishedMaterialHandle {
-    Toon(Handle<ToonMaterial>),
-    Water(Handle<WaterMaterial>),
-    Energy(Handle<EnergyMaterial>),
-    Shield(Handle<ShieldMaterial>),
-    Ice(Handle<IceMaterial>),
-    Lava(Handle<LavaMaterial>),
-}
-
-#[derive(Debug, Clone)]
-struct PublishedMaterialEntry {
-    source_hash: String,
-    handle: PublishedMaterialHandle,
-}
-
-/// Runtime lookup keyed by stable Forge content IDs. Bevy handles never enter
-/// project files or save data.
-#[derive(Resource, Default)]
-pub struct PublishedMaterialCatalog {
-    entries: BTreeMap<String, PublishedMaterialEntry>,
-}
-
-impl PublishedMaterialCatalog {
-    pub fn contains(&self, content_id: &str) -> bool {
-        self.entries.contains_key(content_id)
-    }
-
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProceduralRecipeKind {
-    Biome,
-    Road,
-    Building,
-    Cave,
-    City,
-}
-
-impl ProceduralRecipeKind {
-    fn from_category(category: persistence::ContentCategory) -> Option<Self> {
-        match category {
-            persistence::ContentCategory::Biome => Some(Self::Biome),
-            persistence::ContentCategory::Road => Some(Self::Road),
-            persistence::ContentCategory::Building => Some(Self::Building),
-            persistence::ContentCategory::Cave => Some(Self::Cave),
-            persistence::ContentCategory::City => Some(Self::City),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct PublishedProceduralRecipeEntry {
-    source_hash: String,
-    kind: ProceduralRecipeKind,
-    seed: u64,
-    revision: u64,
-    material_slots: BTreeMap<String, String>,
-    map_points: Vec<PublishedMapPoint>,
-}
-
-/// A map annotation exported by a published World Kit recipe. Fast-travel
-/// nodes are interactive in the in-game map; landmarks remain visible context.
-/// Owned strings keep this interface safe for player-authored content.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PublishedMapPoint {
-    pub id: String,
-    pub label: String,
-    pub position: Vec3,
-    pub kind: PublishedMapPointKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PublishedMapPointKind {
-    FastTravel,
-    Landmark,
-}
-
-/// Published Creature Forge recipes, keyed by stable content id. Enemy
-/// spawners and encounter content resolve creatures through this catalog so
-/// gameplay only ever consumes published (hashed, validated) records.
-#[derive(Resource, Default)]
-pub struct PublishedCreatureCatalog {
-    entries: BTreeMap<String, crate::robots::creature::CreatureSpec>,
-}
-
-impl PublishedCreatureCatalog {
-    pub fn contains(&self, content_id: &str) -> bool {
-        self.entries.contains_key(content_id)
-    }
-
-    pub fn get(&self, content_id: &str) -> Option<&crate::robots::creature::CreatureSpec> {
-        self.entries.get(content_id)
-    }
-
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    pub fn content_ids(&self) -> impl Iterator<Item = &str> {
-        self.entries.keys().map(String::as_str)
-    }
-
-    /// Seed the catalog from baked `assets/published/` content at startup.
-    ///
-    /// Only fills an empty catalog: when a Designer session opens a project,
-    /// the workspace rebuild (which loads the *live* store, drafts included)
-    /// remains the authority and must not be clobbered by stale baked files.
-    pub fn seed_from_published(
-        &mut self,
-        creatures: impl IntoIterator<Item = crate::robots::creature::CreatureSpec>,
-    ) -> usize {
-        if !self.entries.is_empty() {
-            return 0;
-        }
-        for spec in creatures {
-            self.entries.insert(spec.content_id.clone(), spec);
-        }
-        self.entries.len()
-    }
-}
-
-/// Published Dialogue Forge graphs keyed by stable content id. The runtime
-/// dialogue director resolves conversations through this catalog so gameplay
-/// only ever consumes published (validated) records, never project drafts.
-#[derive(Resource, Default)]
-pub struct PublishedDialogueCatalog {
-    entries: BTreeMap<String, dialogue_records::DialogueGraph>,
-}
-
-impl PublishedDialogueCatalog {
-    pub fn contains(&self, content_id: &str) -> bool {
-        self.entries.contains_key(content_id)
-    }
-
-    pub fn get(&self, content_id: &str) -> Option<&dialogue_records::DialogueGraph> {
-        self.entries.get(content_id)
-    }
-
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    pub fn content_ids(&self) -> impl Iterator<Item = &str> {
-        self.entries.keys().map(String::as_str)
-    }
-
-    /// Seed the catalog from baked `assets/published/` content at startup.
-    /// Like the creature catalog, this only fills an empty catalog so a live
-    /// Designer workspace remains the authority.
-    pub fn seed_from_published(
-        &mut self,
-        dialogues: impl IntoIterator<Item = (String, dialogue_records::DialogueGraph)>,
-    ) -> usize {
-        if !self.entries.is_empty() {
-            return 0;
-        }
-        for (content_id, graph) in dialogues {
-            self.entries.insert(content_id, graph);
-        }
-        self.entries.len()
-    }
-}
-
-/// Published deterministic generator inputs keyed by stable Forge content ID.
-/// The catalog contains source data only; generated ECS entities remain
-/// disposable and can be rebuilt without changing authored identity.
-#[derive(Resource, Default)]
-pub struct PublishedProceduralRecipeCatalog {
-    entries: BTreeMap<String, PublishedProceduralRecipeEntry>,
-}
-
-impl PublishedProceduralRecipeCatalog {
-    pub fn contains(&self, content_id: &str) -> bool {
-        self.entries.contains_key(content_id)
-    }
-
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    pub fn material_id(&self, recipe_id: &str, slot: &str) -> Option<&str> {
-        self.entries
-            .get(recipe_id)?
-            .material_slots
-            .get(slot)
-            .map(String::as_str)
-    }
-
-    pub fn generation(&self, recipe_id: &str) -> Option<(ProceduralRecipeKind, u64, u64)> {
-        let entry = self.entries.get(recipe_id)?;
-        Some((entry.kind, entry.seed, entry.revision))
-    }
-
-    pub fn source_hash(&self, recipe_id: &str) -> Option<&str> {
-        self.entries
-            .get(recipe_id)
-            .map(|entry| entry.source_hash.as_str())
-    }
-
-    /// All published map annotations in stable content/node order.
-    pub fn map_points(&self) -> impl Iterator<Item = &PublishedMapPoint> {
-        self.entries
-            .values()
-            .flat_map(|entry| entry.map_points.iter())
-    }
-}
-
-/// Stable appearance request attached to disposable generated geometry.
-#[derive(Component, Debug, Clone, PartialEq, Eq)]
-pub struct ProceduralMaterialBinding {
-    pub recipe_id: String,
-    pub slot: String,
-}
-
-impl ProceduralMaterialBinding {
-    pub fn new(recipe_id: impl Into<String>, slot: impl Into<String>) -> Self {
-        Self {
-            recipe_id: recipe_id.into(),
-            slot: slot.into(),
-        }
-    }
-}
-
-#[derive(Component, Debug, Clone, PartialEq, Eq)]
-struct ResolvedProceduralMaterialBinding {
-    epoch: u64,
-    recipe_id: String,
-    slot: String,
-    material_id: Option<String>,
-}
-
-#[derive(Component, Debug, Clone)]
-struct ProceduralStandardMaterialFallback(Handle<StandardMaterial>);
-
-#[derive(Resource, Default)]
-struct PublishedContentCatalogEpoch(u64);
-
-#[derive(Component, Debug, Clone, PartialEq, Eq)]
-struct EditorMaterialBinding(String);
 
 impl ForgeMaterialSpec {
     fn from_recipe(recipe: &GenericRecipeDraft) -> Self {
@@ -826,13 +581,6 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<EditorAdapterBaselines>()
             .init_resource::<EditorProjectSession>()
             .init_resource::<project_registry::ForgeProjectRegistry>()
-            .init_resource::<PublishedMaterialCatalog>()
-            .init_resource::<PublishedProceduralRecipeCatalog>()
-            .init_resource::<PublishedCreatureCatalog>()
-            .init_resource::<PublishedDialogueCatalog>()
-            .init_resource::<PublishedVehicleCatalog>()
-            .init_resource::<PublishedSpacecraftCatalog>()
-            .init_resource::<PublishedContentCatalogEpoch>()
             .init_resource::<EditorRegistryState>()
             .init_resource::<WorldKitPreviewState>()
             .init_resource::<WorldKitSandboxState>()
@@ -873,7 +621,6 @@ impl Plugin for EngineToolsPlugin {
                 OnExit(EngineToolMode::Editing),
                 (refresh_platformer_runtime_adapters, exit_editor_workspace).chain(),
             )
-            .add_systems(Update, resolve_procedural_material_bindings)
             .add_systems(Update, sync_machine_render_settings)
             .add_systems(
                 Update,
@@ -914,15 +661,13 @@ impl Plugin for EngineToolsPlugin {
     }
 }
 
-/// Independent of `AppState`: later workspaces can edit a loaded chapter while
-/// retaining its game state. No global hotkey is installed until ET2 owns
-/// camera, cursor, and gameplay-input capture.
-#[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EngineToolMode {
-    #[default]
-    Playing,
-    Editing,
-}
+/// Moved to `engine::tool_mode` — it's a small, genuinely cross-cutting state
+/// sibling of `AppState`, not an editor implementation detail; non-designer
+/// gameplay (`plugins::input_plugin`, `app`) branches on it directly. Kept as
+/// a re-export here so those two call sites don't need to change in this
+/// pass; point them at `engine::tool_mode` directly once `EngineToolsPlugin`'s
+/// own registration is reorganized.
+pub use crate::engine::tool_mode::EngineToolMode;
 
 /// Persistent identity used by editor recipes and commands. Runtime Bevy
 /// `Entity` values are intentionally never serialized as content references.
@@ -1017,6 +762,231 @@ pub enum EditorCommandError {
     MissingLevel(String),
     ProjectMutation(String),
     EmptyTransaction,
+    /// A command tried to despawn a World Kit recipe adapter — those are
+    /// generated from a published recipe, not freestanding authored objects.
+    ProtectedEntity(EditorEntityId),
+}
+
+/// Everything needed to respawn an authored object exactly as it existed.
+/// Captured by `EditorDocument::create_object`/`duplicate`/`delete` and
+/// replayed by `EditorCommand::SpawnObject`/`DespawnObject` on
+/// execute/undo/redo — the same field set `duplicate_active` used to copy
+/// ad hoc for live duplication before this slice, generalized so undo/redo
+/// can rebuild an object instead of only copying a live one.
+///
+/// Platformer-prefab primitives (`editor_platformer_kind`) are a deliberate
+/// exception: their runtime behavior components (`MovingPlatform`,
+/// `SpringJumpPad`, `Collider`, ...) are not stored here at all — `spawn`
+/// re-derives them from `primitive`+`transform` via the same deterministic
+/// `PlatformerPrefabDesign::stock` the original creation path uses, since
+/// storing and restoring live physics components would be far more fragile
+/// than recomputing them.
+#[derive(Debug, Clone)]
+pub struct EditorObjectSnapshot {
+    primitive: EditorPrimitive,
+    /// `None` only if the source entity somehow had no `Name` — every create
+    /// path sets one, so `spawn` falls back to a fresh label from `primitive`.
+    name: Option<String>,
+    transform: Transform,
+    access: EditorAccess,
+    bounds: AuthorableBounds,
+    mesh: Option<Mesh3d>,
+    material: Option<MeshMaterial3d<StandardMaterial>>,
+    custom_material: Option<PublishedMaterialHandle>,
+    binding: Option<EditorMaterialBinding>,
+    modifier_stack: Option<EditorModifierStack>,
+}
+
+impl EditorObjectSnapshot {
+    fn capture(world: &World, entity: Entity) -> Self {
+        let primitive = world
+            .get::<EditorPrimitive>(entity)
+            .copied()
+            .unwrap_or(EditorPrimitive::Empty);
+        let custom_material = world
+            .get::<MeshMaterial3d<ToonMaterial>>(entity)
+            .map(|handle| PublishedMaterialHandle::Toon(handle.0.clone()))
+            .or_else(|| {
+                world
+                    .get::<MeshMaterial3d<WaterMaterial>>(entity)
+                    .map(|handle| PublishedMaterialHandle::Water(handle.0.clone()))
+            })
+            .or_else(|| {
+                world
+                    .get::<MeshMaterial3d<EnergyMaterial>>(entity)
+                    .map(|handle| PublishedMaterialHandle::Energy(handle.0.clone()))
+            })
+            .or_else(|| {
+                world
+                    .get::<MeshMaterial3d<ShieldMaterial>>(entity)
+                    .map(|handle| PublishedMaterialHandle::Shield(handle.0.clone()))
+            })
+            .or_else(|| {
+                world
+                    .get::<MeshMaterial3d<IceMaterial>>(entity)
+                    .map(|handle| PublishedMaterialHandle::Ice(handle.0.clone()))
+            })
+            .or_else(|| {
+                world
+                    .get::<MeshMaterial3d<LavaMaterial>>(entity)
+                    .map(|handle| PublishedMaterialHandle::Lava(handle.0.clone()))
+            });
+        Self {
+            primitive,
+            name: world
+                .get::<Name>(entity)
+                .map(|name| name.as_str().to_owned()),
+            transform: world.get::<Transform>(entity).copied().unwrap_or_default(),
+            access: world
+                .get::<EditorAccess>(entity)
+                .copied()
+                .unwrap_or(EditorAccess::Editable),
+            bounds: world
+                .get::<AuthorableBounds>(entity)
+                .copied()
+                .unwrap_or(AuthorableBounds(0.55)),
+            mesh: world.get::<Mesh3d>(entity).cloned(),
+            material: world
+                .get::<MeshMaterial3d<StandardMaterial>>(entity)
+                .cloned(),
+            custom_material,
+            binding: world.get::<EditorMaterialBinding>(entity).cloned(),
+            modifier_stack: world.get::<EditorModifierStack>(entity).cloned(),
+        }
+    }
+
+    fn spawn(&self, world: &mut World, id: EditorEntityId) -> Entity {
+        let name = self
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("{:?} {}", self.primitive, id.0));
+        let mut entity = world.spawn((
+            Authorable,
+            self.access,
+            self.bounds,
+            self.primitive,
+            id,
+            Name::new(name),
+            self.transform,
+            GlobalTransform::default(),
+        ));
+        if let Some(mesh) = self.mesh.clone() {
+            entity.insert(mesh);
+        }
+        if let Some(material) = self.material.clone() {
+            entity.insert(material);
+        }
+        if let Some(material) = self.custom_material.clone() {
+            match material {
+                PublishedMaterialHandle::Toon(handle) => entity.insert(MeshMaterial3d(handle)),
+                PublishedMaterialHandle::Water(handle) => entity.insert(MeshMaterial3d(handle)),
+                PublishedMaterialHandle::Energy(handle) => entity.insert(MeshMaterial3d(handle)),
+                PublishedMaterialHandle::Shield(handle) => entity.insert(MeshMaterial3d(handle)),
+                PublishedMaterialHandle::Ice(handle) => entity.insert(MeshMaterial3d(handle)),
+                PublishedMaterialHandle::Lava(handle) => entity.insert(MeshMaterial3d(handle)),
+            };
+        }
+        if let Some(binding) = self.binding.clone() {
+            entity.insert(binding);
+        }
+        if let Some(modifier_stack) = self.modifier_stack.clone() {
+            entity.insert(modifier_stack);
+        }
+        let entity = entity.id();
+        if let Some(kind) = editor_platformer_kind(self.primitive) {
+            let design = platformer_prefabs::PlatformerPrefabDesign::stock(kind);
+            let (vertices, triangles) = design.collider_geometry();
+            if let Ok(collider) =
+                crate::engine::physics::prelude::Collider::trimesh(vertices, triangles)
+            {
+                insert_platformer_runtime_adapter(world, entity, design, self.transform, collider);
+            }
+        }
+        entity
+    }
+}
+
+/// Thin facade over today's ECS-is-authoritative editing model — the M1
+/// "immediate next slice" facade (docs/editor_roadmap.md), **not** M2's
+/// serializable-document-with-revisions design, which would make the
+/// document authoritative and ECS a compiled preview instead. Routes
+/// object create/duplicate/delete through `EditorCommand`/`EditorUndoStack`
+/// so they are undoable, replacing the raw `World::spawn`/`despawn` calls
+/// their predecessors used.
+struct EditorDocument<'w>(&'w mut World);
+
+impl EditorDocument<'_> {
+    fn execute_transaction(&mut self, transaction: EditorTransaction) -> Result<(), EditorCommandError> {
+        self.0
+            .resource_scope(|world, mut stack: Mut<EditorUndoStack>| stack.execute(world, transaction))
+    }
+
+    /// Build a fresh object of `primitive` at `transform`. Builds it once via
+    /// the existing asset-construction path (`spawn_editor_primitive_record`,
+    /// unchanged — it still owns mesh/collider/runtime-adapter generation),
+    /// captures a snapshot, then despawns and replays through the command
+    /// system so the very first creation and every later redo share one path.
+    fn create_object(&mut self, primitive: EditorPrimitive, transform: Transform) -> EditorEntityId {
+        let id = self.0.resource_mut::<EditorIdAllocator>().allocate();
+        let name = format!("{} {}", primitive_label(primitive), id.0);
+        let entity = spawn_editor_primitive_record(self.0, id, primitive, name, transform);
+        let snapshot = EditorObjectSnapshot::capture(self.0, entity);
+        self.0.despawn(entity);
+        let _ = self.execute_transaction(EditorTransaction {
+            description: format!("Create {}", primitive_label(primitive)),
+            commands: vec![EditorCommand::SpawnObject { id, snapshot }],
+        });
+        id
+    }
+
+    /// Duplicate `source`. Returns `Err` with a status message if `source`
+    /// is missing or is a protected World Kit recipe adapter.
+    fn duplicate(&mut self, source: EditorEntityId) -> Result<EditorEntityId, &'static str> {
+        let entity =
+            resolve_editor_entity(self.0, source).ok_or("Selected object is missing")?;
+        if self.0.get::<EditorWorldAdapter>(entity).is_some() {
+            return Err("World recipe adapters cannot be duplicated directly");
+        }
+        if self.0.get::<Transform>(entity).is_none() {
+            return Err("Selected object has no transform");
+        }
+        let mut snapshot = EditorObjectSnapshot::capture(self.0, entity);
+        snapshot.transform.translation.x += 1.0;
+        let id = self.0.resource_mut::<EditorIdAllocator>().allocate();
+        let _ = self.execute_transaction(EditorTransaction {
+            description: "Duplicate object".into(),
+            commands: vec![EditorCommand::SpawnObject { id, snapshot }],
+        });
+        Ok(id)
+    }
+
+    /// Delete every id in `ids` that isn't a protected recipe adapter, as one
+    /// undoable transaction. Returns `(deleted, protected)` counts — matching
+    /// `delete_selection`'s pre-existing "best effort, report what happened"
+    /// contract rather than failing the whole batch if one id is protected.
+    fn delete(&mut self, ids: &[EditorEntityId]) -> (usize, usize) {
+        let mut commands = Vec::new();
+        let mut protected = 0;
+        for id in ids {
+            let Some(entity) = resolve_editor_entity(self.0, *id) else {
+                continue;
+            };
+            if self.0.get::<EditorWorldAdapter>(entity).is_some() {
+                protected += 1;
+                continue;
+            }
+            let snapshot = EditorObjectSnapshot::capture(self.0, entity);
+            commands.push(EditorCommand::DespawnObject { id: *id, snapshot });
+        }
+        let deleted = commands.len();
+        if !commands.is_empty() {
+            let _ = self.execute_transaction(EditorTransaction {
+                description: format!("Delete {deleted} object(s)"),
+                commands,
+            });
+        }
+        (deleted, protected)
+    }
 }
 
 /// First command family. Additional commands will target versioned recipes,
@@ -1048,15 +1018,30 @@ pub enum EditorCommand {
     },
     SetDialogueGraph {
         content_id: String,
-        before: Box<dialogue_records::DialogueGraph>,
-        after: Box<dialogue_records::DialogueGraph>,
+        before: Box<dialogue_schema::DialogueGraph>,
+        after: Box<dialogue_schema::DialogueGraph>,
+    },
+    /// Create or redo-recreate one authored object from a captured snapshot.
+    /// First universal-history vertical slice (docs/editor_roadmap.md M1/M2):
+    /// `EditorDocument::create_object`/`duplicate` build this instead of the
+    /// raw `World::spawn` calls their predecessors used.
+    SpawnObject {
+        id: EditorEntityId,
+        snapshot: EditorObjectSnapshot,
+    },
+    /// Delete, or undo a creation/duplication, by despawning.
+    DespawnObject {
+        id: EditorEntityId,
+        snapshot: EditorObjectSnapshot,
     },
 }
 
 impl EditorCommand {
     fn target(&self) -> EditorEntityId {
         match self {
-            Self::SetTransform { id, .. } => *id,
+            Self::SetTransform { id, .. }
+            | Self::SpawnObject { id, .. }
+            | Self::DespawnObject { id, .. } => *id,
             Self::SetProceduralRecipe { .. }
             | Self::RenameContent { .. }
             | Self::SetProjectDisplayName { .. }
@@ -1067,6 +1052,29 @@ impl EditorCommand {
 
     fn preflight(&self, world: &mut World, undo: bool) -> Result<(), EditorCommandError> {
         match self {
+            // Spawning (on execute, or on undo of a despawn) is always valid —
+            // the snapshot is self-contained and `id` is either freshly
+            // allocated or was already reserved when first created.
+            // Despawning (on execute, or on undo of a spawn) requires the
+            // entity to exist and not be a protected recipe adapter.
+            Self::SpawnObject { id, .. } if undo => {
+                let entity =
+                    resolve_editor_entity(world, *id).ok_or(EditorCommandError::MissingEntity(*id))?;
+                if world.get::<EditorWorldAdapter>(entity).is_some() {
+                    return Err(EditorCommandError::ProtectedEntity(*id));
+                }
+                return Ok(());
+            }
+            Self::SpawnObject { .. } => return Ok(()),
+            Self::DespawnObject { id, .. } if !undo => {
+                let entity =
+                    resolve_editor_entity(world, *id).ok_or(EditorCommandError::MissingEntity(*id))?;
+                if world.get::<EditorWorldAdapter>(entity).is_some() {
+                    return Err(EditorCommandError::ProtectedEntity(*id));
+                }
+                return Ok(());
+            }
+            Self::DespawnObject { .. } => return Ok(()),
             Self::SetProceduralRecipe { content_id, .. } => {
                 let exists = world
                     .resource::<EditorProjectSession>()
@@ -1138,6 +1146,16 @@ impl EditorCommand {
             Self::SetDialogueGraph {
                 content_id, after, ..
             } => set_dialogue_graph(world, content_id, (**after).clone()),
+            Self::SpawnObject { id, snapshot } => {
+                snapshot.spawn(world, *id);
+                Ok(())
+            }
+            Self::DespawnObject { id, .. } => {
+                let entity =
+                    resolve_editor_entity(world, *id).ok_or(EditorCommandError::MissingEntity(*id))?;
+                world.despawn(entity);
+                Ok(())
+            }
         }
     }
 
@@ -1157,6 +1175,19 @@ impl EditorCommand {
             Self::SetDialogueGraph {
                 content_id, before, ..
             } => set_dialogue_graph(world, content_id, (**before).clone()),
+            // Undoing a spawn despawns it; undoing a despawn respawns it from
+            // the snapshot captured when it was deleted — the exact mirror of
+            // `execute`.
+            Self::SpawnObject { id, .. } => {
+                let entity =
+                    resolve_editor_entity(world, *id).ok_or(EditorCommandError::MissingEntity(*id))?;
+                world.despawn(entity);
+                Ok(())
+            }
+            Self::DespawnObject { id, snapshot } => {
+                snapshot.spawn(world, *id);
+                Ok(())
+            }
         }
     }
 }
@@ -1352,7 +1383,7 @@ fn set_level_display_name(
 fn set_dialogue_graph(
     world: &mut World,
     content_id: &str,
-    value: dialogue_records::DialogueGraph,
+    value: dialogue_schema::DialogueGraph,
 ) -> Result<(), EditorCommandError> {
     dialogue_records::save_dialogue(
         &mut world.resource_mut::<EditorProjectSession>().project,
@@ -2363,7 +2394,7 @@ fn rebuild_published_content_catalogs(world: &mut World, project: &ForgeProject)
             },
         );
     }
-    world.resource_mut::<PublishedMaterialCatalog>().entries = entries;
+    world.resource_mut::<PublishedMaterialCatalog>().replace(entries);
 
     let recipes = project
         .records
@@ -2417,7 +2448,7 @@ fn rebuild_published_content_catalogs(world: &mut World, project: &ForgeProject)
         .collect();
     world
         .resource_mut::<PublishedProceduralRecipeCatalog>()
-        .entries = recipes;
+        .replace(recipes);
 
     let creatures = project
         .records
@@ -2432,7 +2463,7 @@ fn rebuild_published_content_catalogs(world: &mut World, project: &ForgeProject)
             Some((record.content_id.clone(), spec))
         })
         .collect();
-    world.resource_mut::<PublishedCreatureCatalog>().entries = creatures;
+    world.resource_mut::<PublishedCreatureCatalog>().replace(creatures);
 
     let vehicles = project
         .records
@@ -2609,148 +2640,6 @@ fn bootstrap_published_content_catalogs(world: &mut World) {
         ProjectLoadSource::Primary => revision,
         ProjectLoadSource::Recovery(_) => None,
     };
-}
-
-fn restore_procedural_standard_material(world: &mut World, entity: Entity) {
-    let fallback = world
-        .get::<ProceduralStandardMaterialFallback>(entity)
-        .map(|fallback| fallback.0.clone());
-    let Some(fallback) = fallback else {
-        return;
-    };
-    let mut target = world.entity_mut(entity);
-    remove_mesh_material_components(&mut target);
-    target.insert(MeshMaterial3d(fallback));
-}
-
-fn resolve_procedural_material_bindings(world: &mut World) {
-    let targets = world
-        .query::<(
-            Entity,
-            &ProceduralMaterialBinding,
-            Option<&ResolvedProceduralMaterialBinding>,
-            Option<&MeshMaterial3d<StandardMaterial>>,
-        )>()
-        .iter(world)
-        .map(|(entity, binding, resolved, standard)| {
-            (
-                entity,
-                binding.clone(),
-                resolved.cloned(),
-                standard.map(|material| material.0.clone()),
-            )
-        })
-        .collect::<Vec<_>>();
-
-    for (entity, binding, resolved, standard) in targets {
-        let epoch = world.resource::<PublishedContentCatalogEpoch>().0;
-        if resolved.as_ref().is_some_and(|current| {
-            current.epoch == epoch
-                && current.recipe_id == binding.recipe_id
-                && current.slot == binding.slot
-        }) {
-            continue;
-        }
-        let desired = world
-            .resource::<PublishedProceduralRecipeCatalog>()
-            .entries
-            .get(&binding.recipe_id)
-            .and_then(|recipe| recipe.material_slots.get(&binding.slot).cloned());
-        let Some(material_id) = desired else {
-            if resolved
-                .as_ref()
-                .is_some_and(|current| current.material_id.is_some())
-            {
-                restore_procedural_standard_material(world, entity);
-            }
-            world
-                .entity_mut(entity)
-                .insert(ResolvedProceduralMaterialBinding {
-                    epoch,
-                    recipe_id: binding.recipe_id,
-                    slot: binding.slot,
-                    material_id: None,
-                });
-            continue;
-        };
-        if !world
-            .resource::<PublishedMaterialCatalog>()
-            .contains(&material_id)
-        {
-            if resolved
-                .as_ref()
-                .is_some_and(|current| current.material_id.is_some())
-            {
-                restore_procedural_standard_material(world, entity);
-            }
-            world
-                .entity_mut(entity)
-                .insert(ResolvedProceduralMaterialBinding {
-                    epoch,
-                    recipe_id: binding.recipe_id,
-                    slot: binding.slot,
-                    material_id: None,
-                });
-            continue;
-        }
-        if world
-            .get::<ProceduralStandardMaterialFallback>(entity)
-            .is_none()
-        {
-            if let Some(standard) = standard {
-                world
-                    .entity_mut(entity)
-                    .insert(ProceduralStandardMaterialFallback(standard));
-            }
-        }
-        if apply_catalog_material(world, entity, &material_id) {
-            world
-                .entity_mut(entity)
-                .remove::<EditorMaterialBinding>()
-                .insert(ResolvedProceduralMaterialBinding {
-                    epoch,
-                    recipe_id: binding.recipe_id,
-                    slot: binding.slot,
-                    material_id: Some(material_id),
-                });
-        }
-    }
-}
-
-fn remove_mesh_material_components(entity: &mut EntityWorldMut<'_>) {
-    entity.remove::<MeshMaterial3d<StandardMaterial>>();
-    entity.remove::<MeshMaterial3d<ToonMaterial>>();
-    entity.remove::<MeshMaterial3d<WaterMaterial>>();
-    entity.remove::<MeshMaterial3d<EnergyMaterial>>();
-    entity.remove::<MeshMaterial3d<ShieldMaterial>>();
-    entity.remove::<MeshMaterial3d<IceMaterial>>();
-    entity.remove::<MeshMaterial3d<LavaMaterial>>();
-}
-
-fn apply_catalog_material(world: &mut World, entity: Entity, content_id: &str) -> bool {
-    if world.get::<Mesh3d>(entity).is_none() {
-        return false;
-    }
-    let handle = world
-        .resource::<PublishedMaterialCatalog>()
-        .entries
-        .get(content_id)
-        .map(|entry| entry.handle.clone());
-    let Some(handle) = handle else {
-        return false;
-    };
-    let mut target = world.entity_mut(entity);
-    remove_mesh_material_components(&mut target);
-    match handle {
-        PublishedMaterialHandle::Toon(handle) => target.insert(MeshMaterial3d(handle)),
-        PublishedMaterialHandle::Water(handle) => target.insert(MeshMaterial3d(handle)),
-        PublishedMaterialHandle::Energy(handle) => target.insert(MeshMaterial3d(handle)),
-        PublishedMaterialHandle::Shield(handle) => target.insert(MeshMaterial3d(handle)),
-        PublishedMaterialHandle::Ice(handle) => target.insert(MeshMaterial3d(handle)),
-        PublishedMaterialHandle::Lava(handle) => target.insert(MeshMaterial3d(handle)),
-    };
-    target.insert(EditorMaterialBinding(content_id.into()));
-    true
 }
 
 fn primitive_standard_color(primitive: EditorPrimitive) -> Color {
@@ -7197,7 +7086,7 @@ fn clear_selected_object_material(world: &mut World) {
 
 fn selected_dialogue_graph(
     world: &World,
-) -> Result<(String, dialogue_records::DialogueGraph), String> {
+) -> Result<(String, dialogue_schema::DialogueGraph), String> {
     let selected = world.resource::<EditorRegistryState>().selected;
     let session = world.resource::<EditorProjectSession>();
     let content_id = session
@@ -7214,8 +7103,8 @@ fn selected_dialogue_graph(
 fn queue_dialogue_graph_edit(
     world: &mut World,
     content_id: String,
-    before: dialogue_records::DialogueGraph,
-    after: dialogue_records::DialogueGraph,
+    before: dialogue_schema::DialogueGraph,
+    after: dialogue_schema::DialogueGraph,
     description: impl Into<String>,
 ) {
     world
@@ -7770,13 +7659,13 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
             };
             let mut after = before.clone();
             after.mode = match after.mode {
-                dialogue_records::DialoguePlaybackMode::Gameplay => {
+                dialogue_schema::DialoguePlaybackMode::Gameplay => {
                     after.pause_gameplay = true;
-                    dialogue_records::DialoguePlaybackMode::Cutscene
+                    dialogue_schema::DialoguePlaybackMode::Cutscene
                 }
-                dialogue_records::DialoguePlaybackMode::Cutscene => {
+                dialogue_schema::DialoguePlaybackMode::Cutscene => {
                     after.pause_gameplay = false;
-                    dialogue_records::DialoguePlaybackMode::Gameplay
+                    dialogue_schema::DialoguePlaybackMode::Gameplay
                 }
             };
             let mode = after.mode;
@@ -7788,7 +7677,7 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 set_editor_status(world, "Select a Dialogue Forge record first");
                 return;
             };
-            if before.nodes.len() >= dialogue_records::MAX_DIALOGUE_NODES {
+            if before.nodes.len() >= dialogue_schema::MAX_DIALOGUE_NODES {
                 set_editor_status(world, "Dialogue node limit reached");
                 return;
             }
@@ -7802,7 +7691,7 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                     previous.next_node = Some(node_id.clone());
                 }
             }
-            after.nodes.push(dialogue_records::DialogueNode::speech(
+            after.nodes.push(dialogue_schema::DialogueNode::speech(
                 &node_id,
                 "Speaker",
                 "New dialogue line.",
@@ -7820,13 +7709,13 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 set_editor_status(world, "Add a dialogue node first");
                 return;
             };
-            if node.timeline.len() >= dialogue_records::MAX_TIMELINE_CUES {
+            if node.timeline.len() >= dialogue_schema::MAX_TIMELINE_CUES {
                 set_editor_status(world, "Timeline cue limit reached");
                 return;
             }
-            node.timeline.push(dialogue_records::TimelineCue {
+            node.timeline.push(dialogue_schema::TimelineCue {
                 at_seconds: node.minimum_hold_seconds.max(0.0),
-                action: dialogue_records::TimelineAction::PlayAnimation {
+                action: dialogue_schema::TimelineAction::PlayAnimation {
                     actor: node.speaker.clone(),
                     clip: "talk_gesture".into(),
                     speed: 1.0,
@@ -9107,7 +8996,7 @@ fn save_editor_project(world: &mut World, publish: bool) -> bool {
 }
 
 fn publish_editor_project(world: &mut World) -> bool {
-    publish_editor_project_to(world, &publish::published_dir())
+    publish_editor_project_to(world, &crate::world::published_manifest::published_dir())
 }
 
 fn publish_editor_project_to(world: &mut World, output_dir: &std::path::Path) -> bool {
@@ -9293,7 +9182,6 @@ fn filtered_authorable_ids(world: &mut World) -> Vec<EditorEntityId> {
 }
 
 fn spawn_editor_primitive(world: &mut World, primitive: EditorPrimitive) {
-    let id = world.resource_mut::<EditorIdAllocator>().allocate();
     let camera_transform = world
         .query_filtered::<&Transform, With<EditorCamera>>()
         .iter(world)
@@ -9307,7 +9195,7 @@ fn spawn_editor_primitive(world: &mut World, primitive: EditorPrimitive) {
         transform.scale = Vec3::splat(1.25);
     }
     let kind = primitive_label(primitive);
-    spawn_editor_primitive_record(world, id, primitive, format!("{kind} {}", id.0), transform);
+    let id = EditorDocument(world).create_object(primitive, transform);
     world.resource_mut::<EditorSelection>().replace(id);
     world.resource_mut::<EditorDocumentState>().dirty = true;
     set_editor_status(world, format!("Created {kind} {}", id.0));
@@ -9589,104 +9477,14 @@ fn duplicate_active(world: &mut World) {
         set_editor_status(world, "Select an object before duplicating");
         return;
     };
-    let Some(entity) = resolve_editor_entity(world, active) else {
-        set_editor_status(world, "Selected object is missing");
-        return;
-    };
-    if world.get::<EditorWorldAdapter>(entity).is_some() {
-        set_editor_status(world, "World recipe adapters cannot be duplicated directly");
-        return;
+    match EditorDocument(world).duplicate(active) {
+        Ok(id) => {
+            world.resource_mut::<EditorSelection>().replace(id);
+            world.resource_mut::<EditorDocumentState>().dirty = true;
+            set_editor_status(world, format!("Duplicated as object #{}", id.0));
+        }
+        Err(message) => set_editor_status(world, message),
     }
-    let Some(mut transform) = world.get::<Transform>(entity).copied() else {
-        set_editor_status(world, "Selected object has no transform");
-        return;
-    };
-    let primitive = world
-        .get::<EditorPrimitive>(entity)
-        .copied()
-        .unwrap_or(EditorPrimitive::Empty);
-    let access = world
-        .get::<EditorAccess>(entity)
-        .copied()
-        .unwrap_or(EditorAccess::Editable);
-    let bounds = world
-        .get::<AuthorableBounds>(entity)
-        .copied()
-        .unwrap_or(AuthorableBounds(0.55));
-    let mesh = world.get::<Mesh3d>(entity).cloned();
-    let material = world
-        .get::<MeshMaterial3d<StandardMaterial>>(entity)
-        .cloned();
-    let custom_material = world
-        .get::<MeshMaterial3d<ToonMaterial>>(entity)
-        .map(|handle| PublishedMaterialHandle::Toon(handle.0.clone()))
-        .or_else(|| {
-            world
-                .get::<MeshMaterial3d<WaterMaterial>>(entity)
-                .map(|handle| PublishedMaterialHandle::Water(handle.0.clone()))
-        })
-        .or_else(|| {
-            world
-                .get::<MeshMaterial3d<EnergyMaterial>>(entity)
-                .map(|handle| PublishedMaterialHandle::Energy(handle.0.clone()))
-        })
-        .or_else(|| {
-            world
-                .get::<MeshMaterial3d<ShieldMaterial>>(entity)
-                .map(|handle| PublishedMaterialHandle::Shield(handle.0.clone()))
-        })
-        .or_else(|| {
-            world
-                .get::<MeshMaterial3d<IceMaterial>>(entity)
-                .map(|handle| PublishedMaterialHandle::Ice(handle.0.clone()))
-        })
-        .or_else(|| {
-            world
-                .get::<MeshMaterial3d<LavaMaterial>>(entity)
-                .map(|handle| PublishedMaterialHandle::Lava(handle.0.clone()))
-        });
-    let binding = world.get::<EditorMaterialBinding>(entity).cloned();
-    let authored_name = world
-        .get::<Name>(entity)
-        .map(|name| name.as_str().to_owned());
-    let modifier_stack = world.get::<EditorModifierStack>(entity).cloned();
-    transform.translation.x += 1.0;
-    let id = world.resource_mut::<EditorIdAllocator>().allocate();
-    let mut duplicate = world.spawn((
-        Authorable,
-        access,
-        bounds,
-        primitive,
-        id,
-        Name::new(authored_name.unwrap_or_else(|| format!("{:?} {}", primitive, id.0))),
-        transform,
-        GlobalTransform::default(),
-    ));
-    if let Some(mesh) = mesh {
-        duplicate.insert(mesh);
-    }
-    if let Some(material) = material {
-        duplicate.insert(material);
-    }
-    if let Some(material) = custom_material {
-        match material {
-            PublishedMaterialHandle::Toon(handle) => duplicate.insert(MeshMaterial3d(handle)),
-            PublishedMaterialHandle::Water(handle) => duplicate.insert(MeshMaterial3d(handle)),
-            PublishedMaterialHandle::Energy(handle) => duplicate.insert(MeshMaterial3d(handle)),
-            PublishedMaterialHandle::Shield(handle) => duplicate.insert(MeshMaterial3d(handle)),
-            PublishedMaterialHandle::Ice(handle) => duplicate.insert(MeshMaterial3d(handle)),
-            PublishedMaterialHandle::Lava(handle) => duplicate.insert(MeshMaterial3d(handle)),
-        };
-    }
-    if let Some(binding) = binding {
-        duplicate.insert(binding);
-    }
-    if let Some(modifier_stack) = modifier_stack {
-        duplicate.insert(modifier_stack);
-    }
-    world.resource_mut::<EditorSelection>().replace(id);
-    world.resource_mut::<EditorDocumentState>().dirty = true;
-    set_editor_status(world, format!("Duplicated as object #{}", id.0));
 }
 
 fn delete_selection(world: &mut World) {
@@ -9698,18 +9496,7 @@ fn delete_selection(world: &mut World) {
         set_editor_status(world, "Nothing selected to delete");
         return;
     }
-    let mut deleted = 0;
-    let mut protected = 0;
-    for id in &ids {
-        if let Some(entity) = resolve_editor_entity(world, *id) {
-            if world.get::<EditorWorldAdapter>(entity).is_some() {
-                protected += 1;
-            } else {
-                world.despawn(entity);
-                deleted += 1;
-            }
-        }
-    }
+    let (deleted, protected) = EditorDocument(world).delete(&ids);
     if protected == 0 {
         world.resource_mut::<EditorSelection>().clear();
     }
@@ -10893,6 +10680,9 @@ fn editor_camera_controls(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::published_catalogs::{
+        resolve_procedural_material_bindings, ProceduralMaterialBinding, PublishedDialogueCatalog,
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn persistence_test_world(label: &str) -> (World, std::path::PathBuf) {

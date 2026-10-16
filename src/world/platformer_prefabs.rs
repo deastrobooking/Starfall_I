@@ -4,6 +4,12 @@
 //! this module derives the preview/runtime mesh.  Designers can use the stock
 //! recipe, alter its dimensions, or simply use the editor transform for broad
 //! changes without baking transient Bevy handles into project files.
+//!
+//! Lives under `src/world/` rather than `src/engine_tools/` because it has no
+//! `ForgeProject`/authoring dependency — it is pure mesh/collider geometry
+//! consumed directly by gameplay (`world::platformer_route_spawn` spawns real
+//! moving platforms/spring pads/collapse bridges from it at route-load time,
+//! with no Designer feature gate).
 
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};

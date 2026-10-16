@@ -155,7 +155,11 @@ fn chest_proximity_system(
                     .distance(chest_transform.translation);
                 (dist <= 2.0).then_some((player_entity, player_index.0, dist))
             })
-            .min_by(|(_, _, left_dist), (_, _, right_dist)| left_dist.total_cmp(right_dist))
+            .min_by(|(_, left_index, left_dist), (_, right_index, right_dist)| {
+                left_dist
+                    .total_cmp(right_dist)
+                    .then_with(|| left_index.cmp(right_index))
+            })
         else {
             continue;
         };
@@ -207,6 +211,7 @@ fn chest_proximity_system(
         }
 
         loot_ev.write(LootCollectedEvent {
+            player_index,
             loot_type: format!("{:?}", chest.loot_type),
             amount,
         });

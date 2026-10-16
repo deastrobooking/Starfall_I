@@ -16,9 +16,7 @@ use crate::components::world::{
 };
 use crate::engine::physics::prelude::{Collider, RigidBody};
 use crate::engine::rendering::PbrBundle;
-use crate::engine_tools::platformer_prefabs::{
-    PlatformerBehavior, PlatformerPrefabDesign, PlatformerPrefabKind,
-};
+use super::platformer_prefabs::{PlatformerBehavior, PlatformerPrefabDesign, PlatformerPrefabKind};
 
 /// Marks everything spawned for one shared-screen route, so a level teardown
 /// is a single despawn query rather than bookkeeping per piece.

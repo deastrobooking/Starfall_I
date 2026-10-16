@@ -15,17 +15,20 @@ use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 use std::path::PathBuf;
 
-use crate::engine_tools::publish::{
-    published_dir, published_generation_in, PublishedDialogue, PublishedGenerationSnapshot,
-    PublishedSpaceship, PublishedVehicle, PublishedWeapon,
-};
-use crate::engine_tools::{PublishedCreatureCatalog, PublishedDialogueCatalog};
 use crate::resources::{ShopCatalog, ShopCategory, ShopItem};
 use crate::robots::creature::CreatureSpec;
 use crate::spaceship_forge::PublishedSpacecraftCatalog;
 use crate::vehicle_forge::PublishedVehicleCatalog;
 use crate::world::platformer_chunk_library::chunk_by_id;
 use crate::world::platformer_routes::PublishedPlatformerRouteCatalog;
+use crate::world::published_catalogs::{
+    resolve_procedural_material_bindings, PublishedContentCatalogEpoch, PublishedCreatureCatalog,
+    PublishedDialogueCatalog, PublishedMaterialCatalog, PublishedProceduralRecipeCatalog,
+};
+use crate::world::published_manifest::{
+    published_dir, published_generation_in, PublishedDialogue, PublishedGenerationSnapshot,
+    PublishedSpaceship, PublishedVehicle, PublishedWeapon,
+};
 
 pub struct PublishedContentPlugin;
 
@@ -57,9 +60,15 @@ impl Plugin for PublishedContentPlugin {
             .init_resource::<PublishedSpacecraftCatalog>()
             .init_resource::<PublishedPlatformerRouteCatalog>()
             .init_resource::<PublishedContentRoot>()
+            .init_resource::<PublishedMaterialCatalog>()
+            .init_resource::<PublishedProceduralRecipeCatalog>()
+            .init_resource::<PublishedCreatureCatalog>()
+            .init_resource::<PublishedDialogueCatalog>()
+            .init_resource::<PublishedContentCatalogEpoch>()
             .add_message::<ReloadPublishedContentCatalogs>()
             .add_systems(PublishedContentBootstrap, load_published_content)
-            .add_systems(Update, reload_published_content_catalogs);
+            .add_systems(Update, reload_published_content_catalogs)
+            .add_systems(Update, resolve_procedural_material_bindings);
         app.world_mut()
             .resource_mut::<MainScheduleOrder>()
             .insert_startup_before(StateTransition, PublishedContentBootstrap);
@@ -249,7 +258,7 @@ fn load_published_content(
     let dialogues: Vec<PublishedDialogue> = read_published(&snapshot, "dialogues.json");
     if !dialogues.is_empty() {
         let valid = dialogues.into_iter().filter_map(|published| {
-            let errors = crate::engine_tools::dialogue_records::validate_dialogue(&published.graph);
+            let errors = crate::world::dialogue_schema::validate_dialogue(&published.graph);
             if errors.is_empty() {
                 Some((published.content_id.clone(), published.graph))
             } else {
@@ -456,7 +465,7 @@ mod tests {
 
     #[test]
     fn published_dialogues_seed_the_catalog_and_invalid_graphs_are_skipped() {
-        use crate::engine_tools::dialogue_records::{DialogueChoice, DialogueGraph, DialogueNode};
+        use crate::world::dialogue_schema::{DialogueChoice, DialogueGraph, DialogueNode};
 
         let root = test_dir("dialogue_bootstrap");
         let generation = "dddddddddddddddd";

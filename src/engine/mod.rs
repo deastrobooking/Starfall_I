@@ -33,6 +33,7 @@ pub mod platform_paths;
 pub mod rendering;
 pub mod spatial_lod;
 pub mod state;
+pub mod tool_mode;
 pub mod vfx;
 /// GPU compute validation for VFX update-module kernels — see the module
 /// doc comment; not part of the live game, only `examples/vfx_gpu_validate.rs`.

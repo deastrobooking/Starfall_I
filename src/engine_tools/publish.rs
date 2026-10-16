@@ -27,15 +27,20 @@ use super::project_registry::ForgeProjectRegistry;
 use super::spaceship_records;
 use super::vehicle_records;
 use super::weapon_records;
-use crate::combat::weapon_forge::WeaponSpec;
 use crate::robots::creature::CreatureSpec;
-use crate::spaceship_forge::SpacecraftSpec;
-use crate::vehicle_forge::VehicleSpec;
+// The read side of the publish manifest now lives in `world::published_manifest`
+// so the Game edition can resolve a publication without depending on
+// `engine_tools` — `PublishedGenerationManifest`/`read_generation_manifest`
+// and the three manifest constants are genuinely shared with the writer
+// below, which is why this module imports them back rather than the other
+// way around.
+use crate::world::published_manifest::{
+    published_dir, read_generation_manifest, PublishedDialogue, PublishedGenerationManifest,
+    PublishedSpaceship, PublishedVehicle, PublishedWeapon, PUBLISHED_GENERATIONS_DIR,
+    PUBLISHED_MANIFEST_FILE, PUBLISHED_MANIFEST_SCHEMA,
+};
 
 const RECOVERY_LIMIT: usize = 3;
-const PUBLISHED_MANIFEST_SCHEMA: u32 = 1;
-const PUBLISHED_MANIFEST_FILE: &str = "current.json";
-const PUBLISHED_GENERATIONS_DIR: &str = "generations";
 const WEAPONS_FILE: &str = "weapons.json";
 const CREATURES_FILE: &str = "creatures.json";
 const VEHICLES_FILE: &str = "vehicles.json";
@@ -108,16 +113,6 @@ fn acquire_published_output_lock(out_dir: &Path) -> Result<PublishedOutputLock, 
     })
 }
 
-/// A single pointer is the publication commit point. Generation directories
-/// are immutable and complete before this document is atomically replaced, so
-/// the consumer can never observe a weapon file from one run and a creature
-/// file from another.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-struct PublishedGenerationManifest {
-    schema_version: u32,
-    generation: String,
-}
-
 struct BakedGeneration {
     generation: String,
     weapons_json: Vec<u8>,
@@ -136,36 +131,6 @@ struct StagedGeneration {
     manifest_json: Vec<u8>,
     report: PublishReport,
     installed_new: bool,
-}
-
-/// One published weapon: the design plus the stable id the game resolves it
-/// by (equip slots and save files reference this id).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PublishedWeapon {
-    pub content_id: String,
-    pub spec: WeaponSpec,
-}
-
-/// A published vehicle recipe paired with its stable project content id.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct PublishedVehicle {
-    pub content_id: String,
-    pub spec: VehicleSpec,
-}
-
-/// A published spacecraft recipe paired with its stable project content id.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct PublishedSpaceship {
-    pub content_id: String,
-    pub spec: SpacecraftSpec,
-}
-
-/// One published dialogue graph: the validated conversation plus the stable
-/// id NPCs, chapter scripts, and gameplay signals reference it by.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct PublishedDialogue {
-    pub content_id: String,
-    pub graph: dialogue_records::DialogueGraph,
 }
 
 /// What a publish run produced, for the hub status line.
@@ -210,10 +175,6 @@ impl PublishReport {
 }
 
 /// The directory the Game edition reads published content from.
-pub fn published_dir() -> PathBuf {
-    crate::engine::platform_paths::asset_root().join("published")
-}
-
 /// Collect every publishable weapon, sorted by content id for deterministic
 /// output.
 fn bake_weapons(project: &ForgeProject) -> Result<Vec<PublishedWeapon>, String> {
@@ -661,89 +622,6 @@ enum ManifestPromotion {
     CommittedDurabilityUnknown(String),
 }
 
-fn read_generation_manifest(out_dir: &Path) -> Result<Option<PublishedGenerationManifest>, String> {
-    let path = out_dir.join(PUBLISHED_MANIFEST_FILE);
-    let bytes = match std::fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(format!(
-                "Could not read published manifest {}: {error}",
-                path.display()
-            ));
-        }
-    };
-    let manifest: PublishedGenerationManifest = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("Published manifest {} is invalid: {error}", path.display()))?;
-    if manifest.schema_version != PUBLISHED_MANIFEST_SCHEMA {
-        return Err(format!(
-            "Published manifest {} uses unsupported schema {}",
-            path.display(),
-            manifest.schema_version
-        ));
-    }
-    if manifest.generation.len() != 16
-        || !manifest
-            .generation
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit())
-    {
-        return Err(format!(
-            "Published manifest {} contains an invalid generation id",
-            path.display()
-        ));
-    }
-    Ok(Some(manifest))
-}
-
-/// One immutable view of the publication pointer. A Game catalog load keeps
-/// this snapshot for every category so a concurrent publish cannot mix files
-/// from different generations.
-#[derive(Debug, Clone)]
-pub(crate) struct PublishedGenerationSnapshot {
-    content_dir: PathBuf,
-}
-
-impl PublishedGenerationSnapshot {
-    pub(crate) fn file(&self, file: &str) -> PathBuf {
-        self.content_dir.join(file)
-    }
-}
-
-/// Resolve the commit pointer exactly once. Projects published before
-/// generation manifests were introduced retain the legacy flat directory
-/// until their next publish.
-pub(crate) fn published_generation_in(
-    out_dir: &Path,
-) -> Result<PublishedGenerationSnapshot, String> {
-    let content_dir = match read_generation_manifest(out_dir)? {
-        Some(manifest) => out_dir
-            .join(PUBLISHED_GENERATIONS_DIR)
-            .join(manifest.generation),
-        None => out_dir.to_path_buf(),
-    };
-    Ok(PublishedGenerationSnapshot { content_dir })
-}
-
-/// Convenience resolver for callers that need only one file. Multi-file
-/// consumers must retain [`PublishedGenerationSnapshot`] instead.
-pub(crate) fn published_file_in(out_dir: &Path, file: &str) -> Result<PathBuf, String> {
-    Ok(published_generation_in(out_dir)?.file(file))
-}
-
-/// Resolve one already-published immutable generation by identity. This is
-/// the export-safe path: another Forge process may advance `current.json`
-/// while an optimized native build is still running.
-pub(crate) fn published_generation_dir(
-    out_dir: &Path,
-    generation: &str,
-) -> Result<PathBuf, String> {
-    if generation.len() != 16 || !generation.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(format!("Invalid published generation id: {generation:?}"));
-    }
-    Ok(out_dir.join(PUBLISHED_GENERATIONS_DIR).join(generation))
-}
-
 fn bake_project_to_with_promote(
     project: &ForgeProject,
     out_dir: &Path,
@@ -882,10 +760,12 @@ pub fn publish_active_project(registry: &ForgeProjectRegistry) -> Result<Publish
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::combat::weapon_forge::{EmitterStyle, GripStyle};
+    use crate::combat::weapon_forge::{EmitterStyle, GripStyle, WeaponSpec};
     use crate::engine_tools::persistence::ContentPayload;
     use crate::spaceship_forge::{SpacecraftClass, SpacecraftSpec};
     use crate::vehicle_forge::{VehicleClass, VehicleSpec};
+    use crate::world::dialogue_schema;
+    use crate::world::published_manifest::{published_file_in, published_generation_dir};
     use std::sync::{mpsc, Arc, Barrier};
     use std::thread;
     use std::time::Duration;
@@ -1132,7 +1012,7 @@ mod tests {
             .expect("stored dialogue should load");
         graph.nodes[0]
             .choices
-            .push(dialogue_records::DialogueChoice {
+            .push(dialogue_schema::DialogueChoice {
                 label: "Leave".into(),
                 target_node: "missing_node".into(),
                 required_flag: None,

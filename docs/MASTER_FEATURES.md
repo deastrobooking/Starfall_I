@@ -164,7 +164,9 @@ Included features:
 - owner-scoped loadout and inventory interactions
 - party-shared vehicle state with explicit driver/passenger rules
 - per-player score slots with computed party aggregates; chest-open scoring and
-  events preserve the nearest player's stable local index
+  events preserve the nearest player's stable local index; equal-distance
+  interactions and loot awards resolve by stable player slot, and loot events
+  carry the recipient slot
 
 Current strength:
 - ownership boundaries are already much clearer than a typical prototype

@@ -14,9 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use super::persistence::ProjectStore;
 use super::project_registry::ForgeProjectRegistry;
-use super::publish::{
-    publish_active_project, published_dir, published_generation_dir, PUBLISHED_CONTENT_FILES,
-};
+use super::publish::{publish_active_project, PUBLISHED_CONTENT_FILES};
+use crate::world::published_manifest::{published_dir, published_generation_dir};
 
 const PROJECT_RECOVERY_LIMIT: usize = 3;
 pub const GAME_BUNDLE_MANIFEST_FILE: &str = "starfall.bundle.json";
@@ -473,7 +472,7 @@ mod tests {
             manifest.published_files.len(),
             PUBLISHED_CONTENT_FILES.len()
         );
-        let selected = crate::engine_tools::publish::published_generation_in(
+        let selected = crate::world::published_manifest::published_generation_in(
             &report.bundle_dir.join("assets/published"),
         )
         .unwrap();

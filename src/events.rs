@@ -98,6 +98,8 @@ pub struct CombatImpactEvent {
 // ── Loot / Chest ──────────────────────────────────────────────────────────────
 #[derive(Message, Debug)]
 pub struct LootCollectedEvent {
+    /// Stable local slot that received this reward.
+    pub player_index: u8,
     pub loot_type: String,
     pub amount: u32,
 }

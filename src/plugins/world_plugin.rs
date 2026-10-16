@@ -47,7 +47,6 @@ use crate::engine::rendering::{
     TerrainMaterialUniform, TerrainPbrBundle, WaterMaterial, WaterMaterialUniform,
 };
 use crate::engine::state::AppState;
-use crate::engine_tools::ProceduralMaterialBinding;
 use crate::events::{PlayerDamagedEvent, PlayerParryEvent, UiMessageEvent};
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
@@ -69,6 +68,7 @@ use crate::world::final_war::{
     coordinated_raid_trigger_system, final_war_phase_announce_system, pressure_accumulation_system,
     win_condition_system,
 };
+use crate::world::published_catalogs::ProceduralMaterialBinding;
 use crate::world::published_craft::PublishedFleet;
 use crate::world::raids::{
     static_defense_score_for_site, RaidId, RaidKind, RaidRegistry, RaidStartResult,
@@ -1419,7 +1419,7 @@ fn dungeon_enemy_spawner_system(
     )>,
     encounter_enemy_q: Query<&DungeonEncounterEnemy>,
     player_q: Query<&Transform, With<Player>>,
-    creature_catalog: Res<crate::engine_tools::PublishedCreatureCatalog>,
+    creature_catalog: Res<crate::world::published_catalogs::PublishedCreatureCatalog>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,

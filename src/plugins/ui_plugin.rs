@@ -48,9 +48,7 @@ use crate::engine::rendering::Camera3dBundle;
 use crate::engine::state::AppState;
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::engine_tools::tool_windows::{ToolWindow, ToolWindowChromeControl};
-use crate::engine_tools::{
-    EngineToolMode, PublishedMapPointKind, PublishedProceduralRecipeCatalog,
-};
+use crate::engine_tools::EngineToolMode;
 use crate::events::*;
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
 use crate::plugins::heavy_bio_plugin::{try_harvest_bio_plot, try_plant_bio_seed, HeavyBioClock};
@@ -79,6 +77,7 @@ use crate::world::missions::{
     active_custom_mission, chapter_mission, mission_for_travel_anchor, CustomMissionState,
     SPECIAL_MISSION_TRAVEL_POINTS,
 };
+use crate::world::published_catalogs::{PublishedMapPointKind, PublishedProceduralRecipeCatalog};
 use crate::world::published_content::ReloadPublishedContentCatalogs;
 use crate::world::published_craft::PublishedFleet;
 use crate::world::robot_pets::{RobotPartKind, RobotPetCollection};
@@ -7629,7 +7628,10 @@ fn nearest_player_to(
     player_q
         .iter()
         .map(|(index, transform)| (index.0, transform.translation.distance(position)))
-        .min_by(|a, b| a.1.total_cmp(&b.1))
+        // Query iteration order is not a player-ownership contract. If two
+        // players are exactly equidistant, resolve guidance to the stable
+        // local slot so the prompt cannot flicker between ECS query orders.
+        .min_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)))
 }
 
 fn dungeon_gate_guidance_verb(opened: bool) -> &'static str {

@@ -13,7 +13,7 @@
 use bevy::prelude::*;
 
 use super::platformer_chunks::{ChunkDef, ChunkPiece, ChunkRole, ChunkSocket, ChunkTheme};
-use crate::engine_tools::platformer_prefabs::PlatformerPrefabKind;
+use super::platformer_prefabs::PlatformerPrefabKind;
 
 /// Shared play depth. Wide enough for four abreast plus fighting room.
 const DEPTH: f32 = 18.0;

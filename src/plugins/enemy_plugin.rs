@@ -2030,7 +2030,7 @@ fn closest_indexed_player<F: bevy::ecs::query::QueryFilter>(
             let dist = origin.distance(transform.translation);
             (dist <= max_range).then_some((entity, transform.translation, index.0, dist))
         })
-        .min_by(|a, b| a.3.total_cmp(&b.3))
+        .min_by(|a, b| a.3.total_cmp(&b.3).then_with(|| a.2.cmp(&b.2)))
 }
 
 fn closest_living_indexed_player(
@@ -2046,7 +2046,7 @@ fn closest_living_indexed_player(
             let distance = origin.distance(position);
             (distance <= max_range).then_some((entity, position, index, distance))
         })
-        .min_by(|a, b| a.3.total_cmp(&b.3))
+        .min_by(|a, b| a.3.total_cmp(&b.3).then_with(|| a.2.cmp(&b.2)))
 }
 
 fn damage_players_in_radius<
@@ -2795,7 +2795,7 @@ fn loot_pickup_system(
                     .distance(loot_transform.translation);
                 (dist <= loot.pickup_radius).then_some((player_entity, player_index, dist))
             })
-            .min_by(|a, b| a.2.total_cmp(&b.2))
+            .min_by(|a, b| a.2.total_cmp(&b.2).then_with(|| a.1.0.cmp(&b.1.0)))
         else {
             continue;
         };
@@ -2822,6 +2822,7 @@ fn loot_pickup_system(
                 duration: 1.8,
             });
             loot_ev.write(LootCollectedEvent {
+                player_index: player_index.0,
                 loot_type: loot.item_id.to_string(),
                 amount: picked,
             });

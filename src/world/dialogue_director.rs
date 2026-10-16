@@ -14,10 +14,8 @@
 use bevy::prelude::*;
 use std::collections::BTreeSet;
 
-use crate::engine_tools::dialogue_records::{
-    DialogueCursor, DialogueGraph, DialogueNode, TimelineAction, TimelineCue,
-};
-use crate::engine_tools::PublishedDialogueCatalog;
+use super::dialogue_schema::{DialogueCursor, DialogueGraph, DialogueNode, TimelineAction, TimelineCue};
+use super::published_catalogs::PublishedDialogueCatalog;
 
 /// Identifies which cue a [`DialogueStateChange::CueFired`] refers to. Cues
 /// are addressed by the stable node id plus their position in that node's
@@ -545,7 +543,7 @@ impl DialogueDirector {
         }
         // Auto-advance only applies to cutscene mode; gameplay conversations
         // always let the player set the pace.
-        if graph.mode != crate::engine_tools::dialogue_records::DialoguePlaybackMode::Cutscene {
+        if graph.mode != crate::world::dialogue_schema::DialoguePlaybackMode::Cutscene {
             return;
         }
         let player_index = active.player_index;
@@ -586,7 +584,7 @@ pub fn cancel(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine_tools::dialogue_records::{
+    use crate::world::dialogue_schema::{
         DialogueChoice, DialogueNode, DialoguePlaybackMode, TimelineAction, TimelineCue,
     };
 
