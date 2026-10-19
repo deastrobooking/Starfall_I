@@ -825,102 +825,115 @@ fn settlement_build_terminal_system(
     player_q: Query<(&PlayerIndex, &Transform, &PlayerInput), With<Player>>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
+    let mut nearest: Option<(f32, u8, &'static str, &SettlementBuildTerminal)> = None;
     for (player_index, player_xf, input) in player_q.iter() {
         if !input.interact {
             continue;
         }
 
-        let mut nearest: Option<(f32, &Transform, &SettlementBuildTerminal)> = None;
         for (terminal_xf, terminal) in terminal_q.iter() {
             let distance = player_xf.translation.distance(terminal_xf.translation);
-            if distance <= terminal.interact_radius
-                && nearest
-                    .map(|(nearest_distance, _, _)| distance < nearest_distance)
-                    .unwrap_or(true)
-            {
-                nearest = Some((distance, terminal_xf, terminal));
+            if distance > terminal.interact_radius {
+                continue;
+            }
+            let replace = nearest
+                .as_ref()
+                .map(|(best_distance, best_player, best_terminal, _)| {
+                    distance
+                        .total_cmp(best_distance)
+                        .then_with(|| player_index.0.cmp(best_player))
+                        .then_with(|| terminal.settlement_id.cmp(best_terminal))
+                        .is_lt()
+                })
+                .unwrap_or(true);
+            if replace {
+                nearest = Some((
+                    distance,
+                    player_index.0,
+                    terminal.settlement_id,
+                    terminal,
+                ));
             }
         }
+    }
 
-        let Some((_, _terminal_xf, terminal)) = nearest else {
-            continue;
-        };
+    let Some((_, player_index, _, terminal)) = nearest else {
+        return;
+    };
 
-        if !settlement_terminal_is_buildable(terminal, &progress, &world_site_registry) {
+    if !settlement_terminal_is_buildable(terminal, &progress, &world_site_registry) {
+        msg_ev.write(UiMessageEvent {
+            text: format!(
+                "P{}: {} needs its cache recovered or site liberated before building.",
+                player_index + 1,
+                terminal.settlement_name
+            ),
+            duration: 3.8,
+        });
+        return;
+    }
+
+    let build_kind = economy.next_recommended_build(terminal.settlement_id, terminal.kind);
+    let def = settlement_build_def(build_kind);
+    match economy.try_build(terminal.settlement_id, build_kind, &mut robot_pets) {
+        Ok(tier) => {
+            let pal = Palette::build(&mut materials, &asset_server);
+            let settlement = MapSettlement {
+                anchor_id: terminal.settlement_id,
+                name: terminal.settlement_name,
+                region: "",
+                kind: terminal.kind,
+                reward_id: terminal.reward_id,
+                x: terminal.origin.x,
+                z: terminal.origin.z,
+                facing_yaw: terminal.facing_yaw,
+                site_id: None,
+            };
+            let layout = settlement_layout_profile(
+                settings.world_seed,
+                settlement,
+                settlement_plaza_radius(terminal.kind),
+            );
+            let rot = Quat::from_rotation_y(terminal.facing_yaw);
+            let base = settlement_build_module_base(
+                terminal.origin,
+                rot,
+                layout,
+                settings.world_seed,
+                build_kind,
+            );
+            spawn_settlement_build_module(
+                &mut commands,
+                &mut meshes,
+                &pal,
+                base,
+                rot,
+                build_kind,
+                tier,
+            );
             msg_ev.write(UiMessageEvent {
                 text: format!(
-                    "P{}: {} needs its cache recovered or site liberated before building.",
-                    player_index.0 + 1,
-                    terminal.settlement_name
-                ),
-                duration: 3.8,
-            });
-            return;
-        }
-
-        let build_kind = economy.next_recommended_build(terminal.settlement_id, terminal.kind);
-        let def = settlement_build_def(build_kind);
-        match economy.try_build(terminal.settlement_id, build_kind, &mut robot_pets) {
-            Ok(tier) => {
-                let pal = Palette::build(&mut materials, &asset_server);
-                let settlement = MapSettlement {
-                    anchor_id: terminal.settlement_id,
-                    name: terminal.settlement_name,
-                    region: "",
-                    kind: terminal.kind,
-                    reward_id: terminal.reward_id,
-                    x: terminal.origin.x,
-                    z: terminal.origin.z,
-                    facing_yaw: terminal.facing_yaw,
-                    site_id: None,
-                };
-                let layout = settlement_layout_profile(
-                    settings.world_seed,
-                    settlement,
-                    settlement_plaza_radius(terminal.kind),
-                );
-                let rot = Quat::from_rotation_y(terminal.facing_yaw);
-                let base = settlement_build_module_base(
-                    terminal.origin,
-                    rot,
-                    layout,
-                    settings.world_seed,
-                    build_kind,
-                );
-                spawn_settlement_build_module(
-                    &mut commands,
-                    &mut meshes,
-                    &pal,
-                    base,
-                    rot,
-                    build_kind,
+                    "P{} built {} tier {} at {}. {}",
+                    player_index + 1,
+                    def.label,
                     tier,
-                );
-                msg_ev.write(UiMessageEvent {
-                    text: format!(
-                        "P{} built {} tier {} at {}. {}",
-                        player_index.0 + 1,
-                        def.label,
-                        tier,
-                        terminal.settlement_name,
-                        economy.status_line(terminal.settlement_id)
-                    ),
-                    duration: 5.5,
-                });
-            }
-            Err(error) => {
-                msg_ev.write(UiMessageEvent {
-                    text: format!(
-                        "Cannot build {} at {}: {}",
-                        def.label,
-                        terminal.settlement_name,
-                        error.message()
-                    ),
-                    duration: 4.5,
-                });
-            }
+                    terminal.settlement_name,
+                    economy.status_line(terminal.settlement_id)
+                ),
+                duration: 5.5,
+            });
         }
-        return;
+        Err(error) => {
+            msg_ev.write(UiMessageEvent {
+                text: format!(
+                    "Cannot build {} at {}: {}",
+                    def.label,
+                    terminal.settlement_name,
+                    error.message()
+                ),
+                duration: 4.5,
+            });
+        }
     }
 }
 
@@ -16313,12 +16326,13 @@ fn spawn_city_streets(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &
     let avenue_spacing = 48.0_f32;
     let street_span = 220.0_f32;
     let street_width = 14.0_f32;
+    let box_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
 
     for i in -4..=4i32 {
         let x = i as f32 * avenue_spacing;
         spawn_street_segment(
             commands,
-            meshes,
+            &box_mesh,
             pal,
             Vec3::new(x, street_y, 0.0),
             street_width,
@@ -16332,7 +16346,7 @@ fn spawn_city_streets(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &
         let z = i as f32 * avenue_spacing;
         spawn_street_segment(
             commands,
-            meshes,
+            &box_mesh,
             pal,
             Vec3::new(0.0, street_y, z),
             street_span * 2.0,
@@ -16340,6 +16354,66 @@ fn spawn_city_streets(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &
             street_width,
             true,
         );
+    }
+
+    // The old city had pedestrian routes but no pavement beneath them. Build
+    // each block's four sidewalk edges from one shared cube mesh so the route
+    // grid reads as a walkable street network without duplicating mesh assets.
+    for block_x in -4..4i32 {
+        for block_z in -4..4i32 {
+            let loop_points = city_sidewalk_loop(block_x, block_z, 0.145);
+            for edge in 0..loop_points.len() {
+                let start = loop_points[edge];
+                let end = loop_points[(edge + 1) % loop_points.len()];
+                let delta = end - start;
+                let length = Vec2::new(delta.x, delta.z).length();
+                let yaw = delta.x.atan2(delta.z);
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(box_mesh.clone()),
+                        material: MeshMaterial3d(pal.stone_block.clone()),
+                        transform: Transform::from_translation((start + end) * 0.5)
+                            .with_rotation(Quat::from_rotation_y(yaw))
+                            .with_scale(Vec3::new(3.4, 0.14, length + 0.08)),
+                        ..default()
+                    },
+                    WorldGeometry,
+                    WalkableSurface,
+                    crate::engine::physics::prelude::RigidBody::Fixed,
+                    crate::engine::physics::prelude::Collider::cuboid(
+                        1.7,
+                        0.07,
+                        (length + 0.08) * 0.5,
+                    ),
+                    world_space_collider_scale(),
+                ));
+            }
+        }
+    }
+
+    // Mark the four approaches at larger avenue junctions. Wide paint bands
+    // stay sparse and readable from a split-screen camera.
+    for x_index in (-4..=4i32).step_by(2) {
+        for z_index in (-4..=4i32).step_by(2) {
+            let x = x_index as f32 * avenue_spacing;
+            let z = z_index as f32 * avenue_spacing;
+            for offset in [-10.0_f32, 10.0] {
+                spawn_street_marking(
+                    commands,
+                    &box_mesh,
+                    pal,
+                    Vec3::new(x, street_y + 0.11, z + offset),
+                    Vec3::new(street_width, 0.03, 2.2),
+                );
+                spawn_street_marking(
+                    commands,
+                    &box_mesh,
+                    pal,
+                    Vec3::new(x + offset, street_y + 0.11, z),
+                    Vec3::new(2.2, 0.03, street_width),
+                );
+            }
+        }
     }
 }
 
@@ -16549,7 +16623,7 @@ fn spawn_city_life(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pal
 
 fn spawn_street_segment(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
+    box_mesh: &Handle<Mesh>,
     pal: &Palette,
     position: Vec3,
     width: f32,
@@ -16559,9 +16633,10 @@ fn spawn_street_segment(
 ) {
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(width, height, depth))),
+            mesh: Mesh3d(box_mesh.clone()),
             material: MeshMaterial3d(pal.street_asphalt.clone()),
-            transform: Transform::from_translation(position),
+            transform: Transform::from_translation(position)
+                .with_scale(Vec3::new(width, height, depth)),
             ..default()
         },
         WorldGeometry,
@@ -16579,21 +16654,31 @@ fn spawn_street_segment(
         } else {
             Vec3::new(position.x, position.y + 0.11, position.z + offset)
         };
-        let dash_mesh = if horizontal {
-            Cuboid::new(dash_len, 0.03, 0.45)
+        let dash_size = if horizontal {
+            Vec3::new(dash_len, 0.03, 0.45)
         } else {
-            Cuboid::new(0.45, 0.03, dash_len)
+            Vec3::new(0.45, 0.03, dash_len)
         };
-        commands.spawn((
-            PbrBundle {
-                mesh: Mesh3d(meshes.add(dash_mesh)),
-                material: MeshMaterial3d(pal.street_paint.clone()),
-                transform: Transform::from_translation(dash_pos),
-                ..default()
-            },
-            WorldGeometry,
-        ));
+        spawn_street_marking(commands, box_mesh, pal, dash_pos, dash_size);
     }
+}
+
+fn spawn_street_marking(
+    commands: &mut Commands,
+    box_mesh: &Handle<Mesh>,
+    pal: &Palette,
+    position: Vec3,
+    size: Vec3,
+) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(box_mesh.clone()),
+            material: MeshMaterial3d(pal.street_paint.clone()),
+            transform: Transform::from_translation(position).with_scale(size),
+            ..default()
+        },
+        WorldGeometry,
+    ));
 }
 
 // ── Sky Platforms ─────────────────────────────────────────────────────────────

@@ -41,8 +41,10 @@ save formats, engine contracts, or feature parity commitments.
    events identify the recipient and each player's HUD shows their own loot
    receipt. NPC conversations choose the closest eligible player and resolve
    exact ties by slot and NPC identity; concurrent hack starts resolve ties by
-   slot. Continue auditing simultaneous interact, shop, and reward paths for
-   explicit ownership and feedback.
+   slot. Shared settlement construction now selects the closest interacting
+   player and resolves ties by slot and terminal ID before spending party
+   resources. Continue auditing simultaneous interact, shop, and reward paths
+   for explicit ownership and feedback.
 2. Close player-scoped UX gaps: menu focus, controller prompts, loadout,
    crafting, rewards, and accessibility must identify the acting player and
    avoid leaking another player's state.

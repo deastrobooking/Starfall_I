@@ -108,6 +108,8 @@ Key features:
 - raids and strategic pressure events
 - settlement building and economy loops
 - route networks and traversal-linked world spaces
+- a grounded downtown street grid with shared-mesh sidewalks, collidable
+  pedestrian routes, and high-visibility crossing bands at major intersections
 
 The project has carried a strong “content world” ambition: the game is large enough that world dramaturgy and systems integration matter as much as raw mechanics.
 
@@ -168,7 +170,7 @@ Included features:
   interactions and loot awards resolve by stable player slot, and loot events
   carry the recipient slot; each player's HUD shows their own short-lived loot
   receipt; simultaneous NPC interactions select the closest eligible player,
-  with stable tie-breaking for dialogue and hacking ownership
+  with stable tie-breaking for dialogue, hacking, and settlement construction
 
 Current strength:
 - ownership boundaries are already much clearer than a typical prototype

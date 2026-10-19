@@ -140,9 +140,11 @@ Work:
   tie-breaking, `LootCollectedEvent` carries the recipient slot, and the
   recipient's own HUD shows the loot receipt. NPC dialogue arbitration now
   chooses the nearest eligible player and resolves ties consistently; hacking
-  ties also resolve by stable player slot. Kill and damage scoring remain
-  disabled until enemy damage/lifecycle events carry an authoritative player
-  source; adding that attribution is the next score ownership step
+  ties also resolve by stable player slot. Settlement construction chooses the
+  nearest interacting player before spending shared resources, with stable
+  tie-breaking. Kill and damage scoring remain disabled until enemy
+  damage/lifecycle events carry an authoritative player source; adding that
+  attribution is the next score ownership step
 - reduce plugin-level overloading in the largest gameplay systems
 - improve domain boundaries between world logic, UI logic, and player simulation
 - continue the editor/game separation work started in [editor_roadmap.md](editor_roadmap.md)
@@ -186,6 +188,11 @@ Priority: make the current campaign feel coherent rather than just large.
 
 Work:
 - tighten the most important world loops: chapter flow, dungeon states, map readability, settlements, and route flow
+- borrow the sibling Zig district's street-level readability in the Bevy city:
+  downtown blocks now have shared-mesh sidewalk geometry, walkable colliders,
+  and marked crossings at major junctions; continue the visual pass with
+  authored plaza nodes, wayfinding, and lighting aligned to the actual road
+  graph
 - the top-down arcade reference dungeon now uses a four-room RPG cadence
   (entrance → traversal → mob pit → elite reliquary), ordered waves, encounter
   seals, and one-time party recovery/reward caches; next, tune enemy mixes,

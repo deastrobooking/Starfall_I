@@ -323,12 +323,38 @@ restore and fixed combat/AI remain open. See [runtime foundations](RUNTIME_FOUND
 - Define feature/plugin contracts before moving files into workspace crates.
 - Extract neutral schema, core/runtime services, graph kernel, gameplay kits,
   Forge, and Heavy Water only when their imports point in one direction.
+- Promote the proven road-authoring/runtime seam toward a reusable Bevy road
+  kit: stable junction IDs, typed road and walkway edges, terrain-sampler
+  adapters, connectivity/grade/clearance validation, and owned mesh/collider
+  generation. Heavy Water's city streets and mountain routes are consumers,
+  not the public data model; require a small independent road-scene consumer
+  before extracting a standalone crate.
 - Prove each capability with Heavy Water plus a focused independent consumer.
 - Keep authored content data-driven and publish through versioned runtime
   bundles rather than editor-owned records.
 **Acceptance:** Heavy Water compiles solely against public framework contracts;
 an independent example selects a strict subset; removing a game-mode module
 does not break unrelated modes.
+
+### EC8 — Web portability and multiplayer boundary (future platform track)
+**Goal:** Keep a credible Rust/Bevy path open for browser builds and later
+online play without making the native game wait on networking.
+- Audit window/input, persistence, asset loading, audio, and timing behind
+  explicit platform capabilities. Keep browser restrictions out of game rules
+  and shared gameplay data.
+- Add a minimal web-target consumer and build gate only after the public
+  runtime/plugin boundary is stable. Label unsupported features rather than
+  weakening native behavior.
+- Preserve stable player identities, deterministic command history, and
+  owner-scoped state as transport-ready contracts. Define authority, transport,
+  and trust boundaries in a separate networking proposal before implementing
+  online sessions.
+- Keep local four-player play the primary product and validation target until
+  the browser build and real latency requirements are measured.
+**Acceptance:** A small public-API Bevy game builds and runs through the chosen
+browser renderer, saves and loads through an explicit web storage adapter, and
+shares game-independent simulation contracts with the native consumer. Online
+play remains a later decision with separate security and latency gates.
 
 ---
 
@@ -339,6 +365,8 @@ does not break unrelated modes.
 - ❌ Workspace crate multiplication before a public contract and consumer test.
 - ❌ `bevy_silk` cloth (cape is an EC4 vertex-shader job reusing `grass.wgsl`).
 - ❌ Rollback netcode now (EC6 deterministic logs first).
+- ❌ Treat WebAssembly compilation as proof of browser support or begin online
+  play before the EC8 platform and authority contracts are reviewed.
 
 ## Open questions
 - **Genre spread of the "20 games":** all character-action like Starfall, or
